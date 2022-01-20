@@ -1,18 +1,24 @@
 #include "operations.h"
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 static pthread_mutex_t single_global_lock;
+
+//trinco de condição
+static pthread_cond_t condDestroy;
+
 
 int tfs_init() {
     state_init();
 
     if (pthread_mutex_init(&single_global_lock, 0) != 0)
         return -1;
-
+    //init do trinco condição
+    if(pthread_cond_init(&condDestroy, NULL) != 0)
+        return -1;
     /* create root inode */
     int root = inode_create(T_DIRECTORY);
     if (root != ROOT_DIR_INUM) {
@@ -27,6 +33,9 @@ int tfs_destroy() {
     if (pthread_mutex_destroy(&single_global_lock) != 0) {
         return -1;
     }
+    if (pthread_cond_destroy(&condDestroy) != 0) {
+        return -1;
+    }
     return 0;
 }
 
@@ -35,9 +44,39 @@ static bool valid_pathname(char const *name) {
 }
 
 int tfs_destroy_after_all_closed() {
-    /* TO DO: implement this */
-    return 0;
+    // static boolean para saber se estamos a chamar a função tfs_open 
+
+    //lock do trinco global
+    if (pthread_mutex_lock(&single_global_lock) != 0)
+        return -1;
+
+
+    //condição de espera
+    while (!mutex_cond_open_files())
+            wait(&condDestroy,&single_global_lock ); 
+
+
+    //unlock do trinco global
+    if (pthread_mutex_unlock(&single_global_lock) != 0)
+        return -1;
+
+    //função tfs_destroy()
+    int bye = tfs_destroy();
+
+    return bye;
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 int _tfs_lookup_unsynchronized(char const *name) {
     if (!valid_pathname(name)) {
@@ -128,6 +167,7 @@ int tfs_close(int fhandle) {
     int r = remove_from_open_file_table(fhandle);
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
+    pthread_cond_signal(&condDestroy);
 
     return r;
 }

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
 /* Persistent FS state  (in reality, it should be maintained in secondary
  * memory; for simplicity, this project maintains it in primary memory) */
@@ -336,4 +337,12 @@ open_file_entry_t *get_open_file_entry(int fhandle) {
         return NULL;
     }
     return &open_file_table[fhandle];
+}
+
+int mutex_cond_open_files(){
+    for(int i = 0; i < MAX_OPEN_FILES; i++){
+        if(free_open_file_entries[i] == TAKEN)
+            return 0;
+    }
+    return 1;
 }
