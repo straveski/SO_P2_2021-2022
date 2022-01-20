@@ -10,6 +10,8 @@ static pthread_mutex_t single_global_lock;
 //trinco de condição
 static pthread_cond_t condDestroy;
 
+//static boolean para controlar outros acessos à função de tfs_destroy_after_all_closed
+static bool COND = false;
 
 int tfs_init() {
     state_init();
@@ -30,9 +32,6 @@ int tfs_init() {
 
 int tfs_destroy() {
     state_destroy();
-    if (pthread_mutex_destroy(&single_global_lock) != 0) {
-        return -1;
-    }
     if (pthread_cond_destroy(&condDestroy) != 0) {
         return -1;
     }
@@ -44,39 +43,27 @@ static bool valid_pathname(char const *name) {
 }
 
 int tfs_destroy_after_all_closed() {
-    // static boolean para saber se estamos a chamar a função tfs_open 
-
     //lock do trinco global
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+    COND = true;
 
+    if(COND == true){
+        while (!mutex_cond_open_files()){
+            printf("ABCDE\n");
+            pthread_cond_wait(&condDestroy,&single_global_lock); 
+        }
+    }
 
-    //condição de espera
-    while (!mutex_cond_open_files())
-            wait(&condDestroy,&single_global_lock ); 
-
+    //função tfs_destroy()
+    int bye = tfs_destroy();
 
     //unlock do trinco global
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
 
-    //função tfs_destroy()
-    int bye = tfs_destroy();
-
     return bye;
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 int _tfs_lookup_unsynchronized(char const *name) {
     if (!valid_pathname(name)) {
@@ -154,6 +141,10 @@ static int _tfs_open_unsynchronized(char const *name, int flags) {
 int tfs_open(char const *name, int flags) {
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+    if (COND == true){
+        pthread_mutex_unlock(&single_global_lock);
+        return -1;
+    }
     int ret = _tfs_open_unsynchronized(name, flags);
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
@@ -167,8 +158,9 @@ int tfs_close(int fhandle) {
     int r = remove_from_open_file_table(fhandle);
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
-    pthread_cond_signal(&condDestroy);
-
+    
+    if(mutex_cond_open_files())
+        pthread_cond_broadcast(&condDestroy);
     return r;
 }
 
