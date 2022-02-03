@@ -30,18 +30,22 @@ int main(int argc, char **argv) {
     //remover fifos ou ficheiros preexistentes
     unlink(srv_pipename);
 
-    int fclient, fsrv; 
-    if(mkfifo(srv_pipename,0666) == -1){
+    int fclient = -1, fsrv; 
+
+    if(mkfifo(srv_pipename,0777) < 0){
         //if(errno == EEXITS)
+        printf("AAAA\n");
         return -1;
     }
-
+    printf("baa\n");
     if((fsrv = open(srv_pipename,O_RDONLY)) < 0)
         return -1;
 
+    printf("aaa1\n");
     for(int i = 0; i < S; i++){
         session_id_array[i].status = 0;
     }
+
     char client_p_name[40];
     int actual_client_session;
     for(;;){
@@ -96,7 +100,8 @@ int main(int argc, char **argv) {
                         return -1;
                     break;
                 }
-                //apaga o cliente 
+                if(close(fclient) < 0)
+                        return -1;
                 session_id_array[actual_client_session-1].status = 0;
                 memset(session_id_array[actual_client_session-1].pipe_name,0,40);
                 break;
