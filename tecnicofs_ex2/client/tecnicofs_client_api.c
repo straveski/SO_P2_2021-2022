@@ -1,35 +1,45 @@
 #include "tecnicofs_client_api.h"
+#include <unistd.h>
+//#include <errno.h>
+
 
 int actual_session_id = 0;
 static char client_p_path[40];
 static char server_p_path[40];
 int fserv, fclient;
+//extern int errno ;
 
 int tfs_mount(char const *client_pipe_path, char const *server_pipe_path) {
-    char mensagem[41], resposta[1];
     strcpy(server_p_path,server_pipe_path);
     strcpy(client_p_path,client_pipe_path);
-    if(mkfifo(client_pipe_path,0666) < 0)
+    if(mkfifo(client_pipe_path,0666) == -1){
+        //if(errno == EEXITS)
         return -1;
+    }
 
     //named pipe do servidor -> aberto para escrever
-    if(fserv = open(server_pipe_path,O_WRONLY) < 0)
+    if((fserv = open(server_pipe_path,O_WRONLY)) < 0)
         return -1;
     //named pipe do cliente -> aberto para ler
-    if (fclient = open(client_pipe_path,O_RDONLY) < 0)
+    if ((fclient = open(client_pipe_path,O_RDONLY)) < 0)
         return -1;
 
     //mensagem a enviar
-    mensagem[0] = TFS_OP_CODE_MOUNT;
-    strcpy(mensagem[2],client_pipe_path);
+    uint8_t mensagem[41*sizeof(char)];
+    int resposta;
+    char opcode = TFS_OP_CODE_MOUNT;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),client_pipe_path,40*sizeof(char));
 
     //envia mensagem para o servidor
-    write(fserv,mensagem,42);
+    if(write(fserv,mensagem,41*sizeof(char)) < 0)
+        return -1;
 
     //lê a mensagem vinda do servidor
-    read(fclient,resposta,1);
+    if(read(fclient,&resposta,sizeof(int)) < 0)
+        return -1;
 
-    actual_session_id = (int*)resposta;
+    actual_session_id = resposta;
     if (actual_session_id == -1)
         return -1;
 
@@ -37,13 +47,18 @@ int tfs_mount(char const *client_pipe_path, char const *server_pipe_path) {
 }
 
 int tfs_unmount() {
-    char mensagem[2], resposta[1];
-    mensagem[0] = TFS_OP_CODE_UNMOUNT;
-    mensagem[1] = (char*)actual_session_id;
+    uint8_t mensagem[sizeof(char)+sizeof(int)];
+    int resposta;
+    char opcode = TFS_OP_CODE_UNMOUNT;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),&actual_session_id,sizeof(int));
 
-    write(fserv,mensagem,2);
-    read(fclient,resposta,1);
-    if ((int*)resposta == -1)
+    if(write(fserv,mensagem,sizeof(char)+sizeof(int)) <= 0)
+        return -1;
+    if(read(fclient,&resposta,sizeof(int)) <= 0)
+        return -1;
+
+    if (resposta == -1)
         return -1;
 
     //fecha os named pipes (cliente e servidor) que o cliente tinha aberto
@@ -61,52 +76,97 @@ int tfs_unmount() {
 }
 
 int tfs_open(char const *name, int flags) {
-    char mensagem[43],resposta[1];
-    mensagem[0] = TFS_OP_CODE_OPEN;
-    mensagem[1] = (char*)actual_session_id;
-    memcpy(mensagem[2],name,40);
-    mensagem[43] = (char*)flags;
+    uint8_t mensagem[41*sizeof(char)+(2*sizeof(int))];
+    int resposta;
+    char opcode = TFS_OP_CODE_OPEN;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),&actual_session_id,sizeof(int));
+    memcpy(mensagem+sizeof(char)+sizeof(int),name,40);
+    memcpy(mensagem+41*sizeof(char)+sizeof(int),&flags,sizeof(int));
 
-    write(fserv,mensagem,43);
-    read(fclient,resposta,1);
-    if ((int*)resposta == -1)
+    if(write(fserv,mensagem,41*sizeof(char)+(2*sizeof(int))) <= 0)
+        return -1;
+    if(read(fclient,&resposta,sizeof(int)) <= 0)
+        return -1;
+    if (resposta == -1)
         return -1;
 
-    return 0;
+    return resposta;
 }
 
 int tfs_close(int fhandle) {
-    char mensagem[3],resposta[1];
-    mensagem[0] = TFS_OP_CODE_CLOSE;
-    mensagem[1] = (char*)actual_session_id;
-    mensagem[2] = (char*)fhandle;
+    uint8_t mensagem[sizeof(char)+(2*sizeof(int))];
+    int resposta;
+    char opcode = TFS_OP_CODE_CLOSE;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),&actual_session_id,sizeof(int));
+    memcpy(mensagem+sizeof(char)+sizeof(int),&fhandle,sizeof(int));
 
-    write(fserv,mensagem,3);
-    read(fclient,resposta,1);
-    if ((int*)resposta == -1)
+    if(write(fserv,mensagem,sizeof(char)+(2*sizeof(int))) <= 0)
+        return -1;
+    if(read(fclient,&resposta,sizeof(int)) <= 0)
+        return -1;
+    if (resposta == -1)
         return -1;
 
-    return 0;
+    return resposta;
 }
 
 ssize_t tfs_write(int fhandle, void const *buffer, size_t len) {
-    
-    return 0;
+    uint8_t mensagem[((len+1)*sizeof(char))+(2*sizeof(int))+sizeof(size_t)];
+    ssize_t resposta;
+    char opcode = TFS_OP_CODE_WRITE;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),&actual_session_id,sizeof(int));
+    memcpy(mensagem+sizeof(char)+sizeof(int),&fhandle,sizeof(int));
+    memcpy(mensagem+sizeof(char)+(2*sizeof(int)),&len,sizeof(size_t));
+    memcpy(mensagem+sizeof(char)+(2*sizeof(int))+sizeof(size_t),buffer,len);
+
+    if(write(fserv,mensagem,((len+1)*sizeof(char))+(2*sizeof(int))+sizeof(size_t)) <= 0)
+        return -1;
+    if(read(fclient,&resposta,sizeof(ssize_t)) <= 0)
+        return -1;
+    if (resposta == -1)
+        return -1;
+    return resposta;
 }
 
 ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
-    
+    uint8_t mensagem[sizeof(char)+2*sizeof(int)+sizeof(size_t)];
+    char opcode = TFS_OP_CODE_READ;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),&actual_session_id,sizeof(int));
+    memcpy(mensagem+sizeof(char)+sizeof(int),&fhandle,sizeof(int));
+    memcpy(mensagem+sizeof(char)+(2*sizeof(int)),&len,sizeof(size_t));
+
+    if(write(fserv,mensagem,(sizeof(char)+(2*sizeof(int))+sizeof(size_t))) == -1)
+        return -1;
+    //if(errno == EPIPE)
+        //return destroy_session
+
+    int read_len;
+    //verificar se leu tudo
+    if(read(fclient,&read_len,sizeof(int)) <= 0)
+        return -1;
+    if(read(fclient,buffer,(size_t)read_len) <= 0)
+        return -1;
+
     return -1;
 }
 
 int tfs_shutdown_after_all_closed() {
-    char mensagem[2],resposta[1];
-    mensagem[0] = TFS_OP_CODE_SHUTDOWN_AFTER_ALL_CLOSED;
-    mensagem[1] = (char*)actual_session_id;
+    uint8_t mensagem[sizeof(char)+sizeof(int)];
+    int resposta;
+    char opcode = TFS_OP_CODE_SHUTDOWN_AFTER_ALL_CLOSED;
+    memcpy(mensagem,&opcode,sizeof(char));
+    memcpy(mensagem+sizeof(char),&actual_session_id,sizeof(int));
 
-    write(fserv,mensagem,2);
-    read(fclient,resposta,1);
-    if ((int*)resposta == -1)
+    if(write(fserv,mensagem,sizeof(char)+sizeof(int)) <= 0)
+        return -1;
+
+    if(read(fclient,&resposta,sizeof(int)) <= 0)
+        return -1;
+    if (resposta == -1)
         return -1;
 
     tfs_unmount();

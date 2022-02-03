@@ -5,6 +5,9 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
 
 /*
  * Establishes a session with a TecnicoFS server.
