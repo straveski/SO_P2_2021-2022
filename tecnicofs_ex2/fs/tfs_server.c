@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #define S (1)
 #define MAXBUFFER (1024)
@@ -33,29 +34,30 @@ int main(int argc, char **argv) {
     int fclient = -1, fsrv; 
 
     if(mkfifo(srv_pipename,0777) < 0){
-        //if(errno == EEXITS)
-        printf("AAAA\n");
+        //if(errno == EEXIST){
+        printf("Couldn't create\n");
+        return -1;
+        //}
+    }
+
+    if((fsrv = open(srv_pipename,O_RDONLY)) < 0){
         return -1;
     }
-    printf("baa\n");
-    if((fsrv = open(srv_pipename,O_RDONLY)) < 0)
-        return -1;
 
-    printf("aaa1\n");
     for(int i = 0; i < S; i++){
         session_id_array[i].status = 0;
     }
-
     char client_p_name[40];
     int actual_client_session;
+    tfs_init();
     for(;;){
         char opcode;
         int flag_cond = -1;
-        if(read(fsrv,&opcode,sizeof(char)) <= 0)
+        if(read(fsrv,&opcode,sizeof(char)) <= 0){
             return -1;
+        }
         switch(opcode){
             case TFS_OP_CODE_MOUNT:
-
                 if(read(fsrv,client_p_name,40*sizeof(char)) <= 0)
                     return -1;
                 for(int i = 0; i < S; i++){
@@ -91,22 +93,28 @@ int main(int argc, char **argv) {
                         return -1;  
                 break;
             case TFS_OP_CODE_UNMOUNT:
+
                 if(read(fsrv,&actual_client_session,sizeof(int)) <= 0)
                     return -1;
                 if(session_id_array[actual_client_session-1].status == 0){
                     uint8_t mensagem2[sizeof(int)];
-                    memcpy(mensagem2,&flag_cond,sizeof(char));
+                    memcpy(mensagem2,&flag_cond,sizeof(int));
                     if(write(fclient,mensagem2,sizeof(int)) <= 0)
                         return -1;
                     break;
                 }
-                if(close(fclient) < 0)
-                        return -1;
+                uint8_t mensagem2[sizeof(int)];
+                int res6 = 0;
                 session_id_array[actual_client_session-1].status = 0;
                 memset(session_id_array[actual_client_session-1].pipe_name,0,40);
+                memcpy(mensagem2,&res6,sizeof(int));
+                if(write(fclient,mensagem2,sizeof(int)) <= 0)
+                        return -1;
+                if(close(fclient) < 0)
+                        return -1;
                 break;
-            case TFS_OP_CODE_OPEN:
 
+            case TFS_OP_CODE_OPEN:
                 if(read(fsrv,&actual_client_session,sizeof(int)) <= 0)
                     return -1;
                 char name_file[40];
@@ -153,7 +161,6 @@ int main(int argc, char **argv) {
                     return -1;
                 break;
             case TFS_OP_CODE_READ:
-
                 if(read(fsrv,&actual_client_session,sizeof(int)) <= 0)
                     return -1;
                 int fhandle3;
@@ -192,13 +199,9 @@ int main(int argc, char **argv) {
                 close(fclient);
 
                 unlink(srv_pipename);
-                
-                break;
                 return 0;
-
             default:
-                break;
-                
+                break;  
         }
     }
     return 0;

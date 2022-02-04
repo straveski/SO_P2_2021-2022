@@ -50,7 +50,6 @@ int tfs_destroy_after_all_closed() {
 
     if(COND == true){
         while (!mutex_cond_open_files()){
-            printf("ABCDE\n");
             pthread_cond_wait(&condDestroy,&single_global_lock); 
         }
     }
@@ -148,7 +147,6 @@ int tfs_open(char const *name, int flags) {
     int ret = _tfs_open_unsynchronized(name, flags);
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
-
     return ret;
 }
 
